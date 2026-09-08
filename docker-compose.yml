@@ -1,0 +1,45 @@
+# AgentOps — docker-compose.yml
+#
+# One-command startup: `docker compose up --build`
+# Dashboard then at: http://localhost:8000/dashboard
+#
+# Assumes Ollama is already running on your HOST machine (`ollama serve`,
+# free/local, per Constitution Principle #2 - Zero-cost by default).
+# extra_hosts below makes host.docker.internal resolve on Linux too
+# (it works out-of-the-box on Docker Desktop for Mac/Windows).
+
+services:
+  agentops:
+    build: .
+    container_name: agentops
+    ports:
+      - "8000:8000"
+    environment:
+      - OLLAMA_BASE_URL=http://host.docker.internal:11434
+      - LLM_MODEL=llama3.2
+      - AGENTOPS_DB_PATH=/app/data/agentops.db
+    volumes:
+      # Persist the SQLite run-log database across container restarts/rebuilds.
+      - agentops_data:/app/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+volumes:
+  agentops_data:
+
+# ---------------------------------------------------------------------------
+# OPTIONAL: run Ollama itself in a container too, instead of on the host.
+# Uncomment this service and change OLLAMA_BASE_URL above to
+# "http://ollama:11434" if you'd rather not install Ollama natively.
+# ---------------------------------------------------------------------------
+#  ollama:
+#    image: ollama/ollama:latest
+#    container_name: ollama
+#    ports:
+#      - "11434:11434"
+#    volumes:
+#      - ollama_data:/root/.ollama
+#
+# volumes:
+#   ollama_data:

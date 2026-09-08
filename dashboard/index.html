@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>AgentOps Dashboard</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --border: #232c38;
+    --text: #e6edf3;
+    --muted: #8b96a5;
+    --accent: #5b9dff;
+    --green: #3fb950;
+    --red: #f85149;
+    --amber: #d29922;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0 0 4px 0;
+  }
+  .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    margin-bottom: 24px;
+  }
+  .status-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    margin-right: 6px;
+    animation: pulse 2s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+  .stat-card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .stat-label {
+    color: var(--muted);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin-bottom: 6px;
+  }
+  .stat-value {
+    font-size: 24px;
+    font-weight: 600;
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 20px;
+  }
+  .panel h2 {
+    font-size: 14px;
+    margin: 0 0 12px 0;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th, td {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 240px;
+  }
+  th {
+    color: var(--muted);
+    font-weight: 500;
+    font-size: 11px;
+    text-transform: uppercase;
+  }
+  .badge {
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .badge.success { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge.error { background: rgba(248,81,73,0.15); color: var(--red); }
+  .badge.none { background: rgba(139,148,165,0.15); color: var(--muted); }
+  .empty-state {
+    color: var(--muted);
+    font-size: 13px;
+    padding: 20px 0;
+    text-align: center;
+  }
+  .refresh-note {
+    color: var(--muted);
+    font-size: 12px;
+  }
+  code {
+    background: rgba(255,255,255,0.06);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<h1><span class="status-dot" id="live-dot"></span>AgentOps Dashboard</h1>
+<div class="subtitle">
+  Live view of agents, runs, and system stats &middot;
+  <span class="refresh-note" id="last-updated">loading...</span>
+</div>
+
+<div class="grid" id="summary-cards">
+  <div class="stat-card"><div class="stat-label">Total Agents</div><div class="stat-value" id="stat-agents">—</div></div>
+  <div class="stat-card"><div class="stat-label">Total Runs</div><div class="stat-value" id="stat-runs">—</div></div>
+  <div class="stat-card"><div class="stat-label">Success Rate</div><div class="stat-value" id="stat-success">—</div></div>
+  <div class="stat-card"><div class="stat-label">Avg Duration</div><div class="stat-value" id="stat-duration">—</div></div>
+</div>
+
+<div class="panel">
+  <h2>Agents</h2>
+  <table id="agents-table">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Role</th>
+        <th>Model</th>
+        <th>Total Runs</th>
+        <th>Success Rate</th>
+        <th>Last Run Status</th>
+        <th>Last Run Time</th>
+      </tr>
+    </thead>
+    <tbody id="agents-body"></tbody>
+  </table>
+  <div class="empty-state" id="agents-empty" style="display:none;">
+    No agents yet. Create one via <code>POST /agents</code>.
+  </div>
+</div>
+
+<div class="panel">
+  <h2>Recent Runs (last 20)</h2>
+  <table id="logs-table">
+    <thead>
+      <tr>
+        <th>Time</th>
+        <th>Agent</th>
+        <th>Task</th>
+        <th>Status</th>
+        <th>Duration</th>
+        <th>Result / Error</th>
+      </tr>
+    </thead>
+    <tbody id="logs-body"></tbody>
+  </table>
+  <div class="empty-state" id="logs-empty" style="display:none;">
+    No runs logged yet.
+  </div>
+</div>
+
+<script>
+  const REFRESH_MS = 4000;
+
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    const d = new Date(ts * 1000);
+    return d.toLocaleTimeString();
+  }
+
+  function fmtPct(v) {
+    if (v === null || v === undefined) return "—";
+    return Math.round(v * 100) + "%";
+  }
+
+  function fmtMs(v) {
+    if (v === null || v === undefined) return "—";
+    return Math.round(v) + "ms";
+  }
+
+  function badge(status) {
+    if (!status) return '<span class="badge none">no runs</span>';
+    const cls = status === "success" ? "success" : "error";
+    return `<span class="badge ${cls}">${status}</span>`;
+  }
+
+  function truncate(s, n) {
+    if (!s) return "—";
+    return s.length > n ? s.slice(0, n) + "…" : s;
+  }
+
+  async function fetchJSON(url) {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`${url} -> HTTP ${res.status}`);
+    return res.json();
+  }
+
+  async function refresh() {
+    try {
+      const summary = await fetchJSON("/dashboard/summary");
+
+      // Top stat cards
+      document.getElementById("stat-agents").textContent = summary.agent_count;
+      document.getElementById("stat-runs").textContent = summary.global_stats.total_runs || 0;
+      document.getElementById("stat-success").textContent = fmtPct(summary.global_stats.success_rate);
+      document.getElementById("stat-duration").textContent = fmtMs(summary.global_stats.avg_duration_ms);
+
+      // Agents table
+      const agentsBody = document.getElementById("agents-body");
+      const agentsEmpty = document.getElementById("agents-empty");
+      agentsBody.innerHTML = "";
+      if (summary.agents.length === 0) {
+        agentsEmpty.style.display = "block";
+      } else {
+        agentsEmpty.style.display = "none";
+        for (const a of summary.agents) {
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${a.name}</td>
+            <td title="${a.role}">${truncate(a.role, 40)}</td>
+            <td>${a.model}</td>
+            <td>${a.total_runs}</td>
+            <td>${fmtPct(a.success_rate)}</td>
+            <td>${badge(a.last_run_status)}</td>
+            <td>${fmtTime(a.last_run_time)}</td>
+          `;
+          agentsBody.appendChild(tr);
+        }
+      }
+
+      // Logs table
+      const logs = await fetchJSON("/logs?limit=20");
+      const logsBody = document.getElementById("logs-body");
+      const logsEmpty = document.getElementById("logs-empty");
+      logsBody.innerHTML = "";
+      if (logs.logs.length === 0) {
+        logsEmpty.style.display = "block";
+      } else {
+        logsEmpty.style.display = "none";
+        for (const log of logs.logs) {
+          const tr = document.createElement("tr");
+          const resultOrError = log.status === "success" ? log.result : log.error;
+          tr.innerHTML = `
+            <td>${fmtTime(log.timestamp)}</td>
+            <td>${log.agent_name || log.agent_id.slice(0, 8)}</td>
+            <td title="${log.task}">${truncate(log.task, 30)}</td>
+            <td>${badge(log.status)}</td>
+            <td>${fmtMs(log.duration_ms)}</td>
+            <td title="${resultOrError || ''}">${truncate(resultOrError, 40)}</td>
+          `;
+          logsBody.appendChild(tr);
+        }
+      }
+
+      document.getElementById("last-updated").textContent =
+        "last updated " + new Date().toLocaleTimeString();
+      document.getElementById("live-dot").style.background = "var(--green)";
+    } catch (err) {
+      document.getElementById("last-updated").textContent = "connection error: " + err.message;
+      document.getElementById("live-dot").style.background = "var(--red)";
+      console.error(err);
+    }
+  }
+
+  refresh();
+  setInterval(refresh, REFRESH_MS);
+</script>
+
+</body>
+</html>
